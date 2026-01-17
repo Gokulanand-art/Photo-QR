@@ -1,14 +1,81 @@
-<html>
-<body style="text-align:center">
-<h2>Captured Image</h2>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
 
-<img src="/preview" width="300"><br><br>
+    <!-- VERY IMPORTANT for mobile -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<a href="/download">
-<button style="background:red;color:white;font-size:20px">
-Download Image
-</button>
-</a>
+    <title>Tourist Photo</title>
 
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            background: #f2f2f2;
+            text-align: center;
+        }
+
+        .container {
+            max-width: 400px;
+            margin: auto;
+            padding: 15px;
+        }
+
+        h2 {
+            margin-top: 10px;
+            color: #333;
+        }
+
+        img {
+            width: 100%;
+            max-width: 100%;
+            height: auto;
+            border-radius: 10px;
+            margin-top: 15px;
+        }
+
+        .btn {
+            display: block;
+            width: 100%;
+            margin-top: 20px;
+            padding: 15px;
+            font-size: 18px;
+            background: red;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            text-decoration: none;
+        }
+
+        .btn:active {
+            background: darkred;
+        }
+
+        .note {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+
+        <h2>Your Photo</h2>
+
+        <img src="/preview" alt="Captured Image">
+
+        <a href="/download" class="btn">
+            Download Image
+        </a>
+
+        <div class="note">
+            Image will be deleted automatically
+        </div>
+
+    </div>
 </body>
 </html>
