@@ -1,76 +1,80 @@
-from flask import Flask, request, send_file, render_template
-import os
-import threading
-import time
+
+    
+
+from flask import Flask, send_file, render_template, request
+import os, threading, time, shutil
 
 app = Flask(__name__)
 
-IMAGE_PATH = "captured.jpg"
-DELETE_AFTER = 45  # seconds
-timer_thread = None
+IMAGE = "captured.jpg"
+TEMP_IMAGE = "temp_download.jpg"
 
+delete_timer = None
+image_seen = False
 
-# -------------------------
-# Background auto-delete
-# -------------------------
-def auto_delete_image():
-    global IMAGE_PATH
-    time.sleep(DELETE_AFTER)
-    if os.path.exists(IMAGE_PATH):
-        os.remove(IMAGE_PATH)
-        print("🗑️ Image auto-deleted after 45 seconds")
+def auto_delete():
+    global image_seen
+    if os.path.exists(IMAGE):
+        os.remove(IMAGE)
+    image_seen = False
 
+def start_timer():
+    global delete_timer
+    if delete_timer:
+        delete_timer.cancel()
+    delete_timer = threading.Timer(45, auto_delete)
+    delete_timer.start()
 
-# -------------------------
-# Upload image from laptop
-# -------------------------
-@app.route("/upload", methods=["POST"])
-def upload():
-    global timer_thread
+def image_watcher():
+    global image_seen
+    while True:
+        if os.path.exists(IMAGE) and not image_seen:
+            image_seen = True
+            start_timer()
+        time.sleep(1)
 
-    file = request.files["image"]
-    file.save(IMAGE_PATH)
-    print("📸 Image received from laptop")
+threading.Thread(target=image_watcher, daemon=True).start()
 
-    # Start delete timer in background
-    timer_thread = threading.Thread(target=auto_delete_image)
-    timer_thread.daemon = True
-    timer_thread.start()
-
-    return "Image uploaded", 200
-
-
-# -------------------------
-# Show image page (QR)
-# -------------------------
 @app.route("/")
-def index():
-    if not os.path.exists(IMAGE_PATH):
-        return "No image available"
-    return render_template("download.html")
+def home():
+    if os.path.exists(IMAGE):
+        return render_template("download.html")
+    return "<h3>No image available</h3>"
 
+@app.route("/preview")
+def preview():
+    if os.path.exists(IMAGE):
+        return send_file(IMAGE)
+    return "No image"
 
-# -------------------------
-# Download + delete image
-# -------------------------
 @app.route("/download")
 def download():
-    if not os.path.exists(IMAGE_PATH):
-        return "Image not found"
+    global delete_timer, image_seen
 
-    response = send_file(IMAGE_PATH, as_attachment=True)
+    if not os.path.exists(IMAGE):
+        return "No image"
 
-    # Delete AFTER sending
-    def delete_after_send():
-        time.sleep(1)
-        if os.path.exists(IMAGE_PATH):
-            os.remove(IMAGE_PATH)
-            print("🗑️ Image deleted after download")
+    shutil.copy(IMAGE, TEMP_IMAGE)
+    os.remove(IMAGE)
+    image_seen = False
 
-    threading.Thread(target=delete_after_send).start()
+    if delete_timer:
+        delete_timer.cancel()
+
+    response = send_file(TEMP_IMAGE, as_attachment=True)
+    threading.Thread(target=cleanup_temp).start()
     return response
 
+def cleanup_temp():
+    time.sleep(2)
+    if os.path.exists(TEMP_IMAGE):
+        os.remove(TEMP_IMAGE)
 
-# -------------------------
+@app.route("/upload", methods=["POST"])
+def upload():
+    file = request.files["image"]
+    file.save(IMAGE)
+    return "OK"
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
