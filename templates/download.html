@@ -3,23 +3,18 @@
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Photo</title>
-<style>
-body{font-family:Arial;text-align:center}
-button{background:red;color:white;padding:15px;border:none;font-size:18px}
-</style>
 </head>
-<body>
+<body style="text-align:center;font-family:Arial">
 
 <h2>Your Photo</h2>
-<img src="/download/{{token}}" width="90%"><br><br>
+
+<img src="/image/{{token}}" width="90%"><br><br>
 
 <a href="/download/{{token}}">
-<button>Download & Exit</button>
+<button style="padding:15px;background:red;color:white;border:none;font-size:18px">
+Download
+</button>
 </a>
-
-<script>
-setTimeout(() => window.close(), 3000);
-</script>
 
 </body>
 </html>
