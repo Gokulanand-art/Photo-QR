@@ -1,62 +1,75 @@
-from flask import Flask, send_file, render_template, abort
-import os, time, uuid, threading
+from flask import Flask, send_file, render_template
+import os
+import threading
+import time
 
-app = Flask(__name__, template_folder="templates")
+app = Flask(__name__)
+
+# ===== GLOBAL STATE =====
+ACTIVE_IMAGE = None
+ACTIVE = False
+LOCK = threading.Lock()
 
 IMAGE_PATH = "captured.jpg"
-
-# token -> timestamp
-SESSIONS = {}
-
-DELETE_AFTER = 45  # seconds
+AUTO_DELETE_SECONDS = 45
 
 
-def auto_delete(token):
-    time.sleep(DELETE_AFTER)
-    if token in SESSIONS:
-        if os.path.exists(IMAGE_PATH):
-            os.remove(IMAGE_PATH)
-        del SESSIONS[token]
-        print("Auto deleted image & token")
+# ===== AUTO DELETE THREAD =====
+def auto_delete():
+    global ACTIVE, ACTIVE_IMAGE
+    time.sleep(AUTO_DELETE_SECONDS)
+
+    with LOCK:
+        if ACTIVE and ACTIVE_IMAGE and os.path.exists(ACTIVE_IMAGE):
+            os.remove(ACTIVE_IMAGE)
+            print("⏱ Auto-deleted image")
+
+        ACTIVE = False
+        ACTIVE_IMAGE = None
 
 
-@app.route("/create")
-def create_session():
-    token = uuid.uuid4().hex
-    SESSIONS[token] = time.time()
+# ===== QR ENTRY POINT (STATIC QR) =====
+@app.route("/")
+@app.route("/scan")
+def scan():
+    with LOCK:
+        if not ACTIVE or not ACTIVE_IMAGE:
+            return "No image available"
 
-    t = threading.Thread(target=auto_delete, args=(token,))
-    t.start()
-
-    return {"url": f"/session/{token}"}
-
-
-@app.route("/session/<token>")
-def view_image(token):
-    if token not in SESSIONS:
-        return "Session expired / Invalid QR", 410
-
-    if not os.path.exists(IMAGE_PATH):
-        return "No image available", 404
-
-    return render_template("download.html", token=token)
+    return render_template("download.html")
 
 
-@app.route("/download/<token>")
-def download(token):
-    if token not in SESSIONS:
-        abort(410)
+# ===== DOWNLOAD IMAGE =====
+@app.route("/download")
+def download():
+    global ACTIVE, ACTIVE_IMAGE
 
-    if not os.path.exists(IMAGE_PATH):
-        abort(404)
+    with LOCK:
+        if not ACTIVE or not ACTIVE_IMAGE:
+            return "Session expired"
 
-    del SESSIONS[token]
+        try:
+            response = send_file(ACTIVE_IMAGE, as_attachment=True)
+            os.remove(ACTIVE_IMAGE)
+            print("⬇ Image downloaded and deleted")
+        except Exception as e:
+            return f"Error: {e}"
 
-    return send_file(
-        IMAGE_PATH,
-        as_attachment=True,
-        download_name="photo.jpg"
-    )
+        ACTIVE = False
+        ACTIVE_IMAGE = None
+
+    return response
+
+
+# ===== FUNCTION CALLED BY main.py =====
+def activate_image():
+    global ACTIVE, ACTIVE_IMAGE
+
+    with LOCK:
+        ACTIVE_IMAGE = IMAGE_PATH
+        ACTIVE = True
+
+    threading.Thread(target=auto_delete, daemon=True).start()
 
 
 if __name__ == "__main__":
