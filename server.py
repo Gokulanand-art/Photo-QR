@@ -1,77 +1,63 @@
-from flask import Flask, send_file, render_template, request
-import os, threading, time, shutil
+from flask import Flask, send_file, render_template, abort
+import os, time, uuid, threading
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder="templates")
 
-IMAGE = "captured.jpg"
-TEMP_IMAGE = "temp_download.jpg"
+IMAGE_PATH = "captured.jpg"
 
-delete_timer = None
-image_seen = False
+# token -> timestamp
+SESSIONS = {}
 
-def auto_delete():
-    global image_seen
-    if os.path.exists(IMAGE):
-        os.remove(IMAGE)
-    image_seen = False
+DELETE_AFTER = 45  # seconds
 
-def start_timer():
-    global delete_timer
-    if delete_timer:
-        delete_timer.cancel()
-    delete_timer = threading.Timer(45, auto_delete)
-    delete_timer.start()
 
-def image_watcher():
-    global image_seen
-    while True:
-        if os.path.exists(IMAGE) and not image_seen:
-            image_seen = True
-            start_timer()
-        time.sleep(1)
+def auto_delete(token):
+    time.sleep(DELETE_AFTER)
+    if token in SESSIONS:
+        if os.path.exists(IMAGE_PATH):
+            os.remove(IMAGE_PATH)
+        del SESSIONS[token]
+        print("Auto deleted image & token")
 
-threading.Thread(target=image_watcher, daemon=True).start()
 
-@app.route("/")
-def home():
-    if os.path.exists(IMAGE):
-        return render_template("download.html")
-    return "<h3>No image available</h3>"
+@app.route("/create")
+def create_session():
+    token = uuid.uuid4().hex
+    SESSIONS[token] = time.time()
 
-@app.route("/preview")
-def preview():
-    if os.path.exists(IMAGE):
-        return send_file(IMAGE)
-    return "No image"
+    t = threading.Thread(target=auto_delete, args=(token,))
+    t.start()
 
-@app.route("/download")
-def download():
-    global delete_timer, image_seen
+    return {"url": f"/session/{token}"}
 
-    if not os.path.exists(IMAGE):
-        return "No image"
 
-    shutil.copy(IMAGE, TEMP_IMAGE)
-    os.remove(IMAGE)
-    image_seen = False
+@app.route("/session/<token>")
+def view_image(token):
+    if token not in SESSIONS:
+        return "Session expired / Invalid QR", 410
 
-    if delete_timer:
-        delete_timer.cancel()
+    if not os.path.exists(IMAGE_PATH):
+        return "No image available", 404
 
-    response = send_file(TEMP_IMAGE, as_attachment=True)
-    threading.Thread(target=cleanup_temp).start()
-    return response
+    return render_template("download.html", token=token)
 
-def cleanup_temp():
-    time.sleep(2)
-    if os.path.exists(TEMP_IMAGE):
-        os.remove(TEMP_IMAGE)
 
-@app.route("/upload", methods=["POST"])
-def upload():
-    file = request.files["image"]
-    file.save(IMAGE)
-    return "OK"
+@app.route("/download/<token>")
+def download(token):
+    if token not in SESSIONS:
+        abort(410)
+
+    if not os.path.exists(IMAGE_PATH):
+        abort(404)
+
+    del SESSIONS[token]
+
+    return send_file(
+        IMAGE_PATH,
+        as_attachment=True,
+        download_name="photo.jpg"
+    )
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
