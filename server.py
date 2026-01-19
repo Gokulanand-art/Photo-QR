@@ -1,6 +1,3 @@
-
-    
-
 from flask import Flask, send_file, render_template, request
 import os, threading, time, shutil
 
