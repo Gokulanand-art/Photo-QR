@@ -1,76 +1,79 @@
-from flask import Flask, send_file, render_template
+from flask import Flask, send_file, render_template, abort
 import os
-import threading
 import time
+import threading
+import uuid
 
 app = Flask(__name__)
 
-# ===== GLOBAL STATE =====
-ACTIVE_IMAGE = None
-ACTIVE = False
-LOCK = threading.Lock()
+IMAGE_DIR = "images"
+SESSIONS = {}
+DELETE_AFTER = 45
 
-IMAGE_PATH = "captured.jpg"
-AUTO_DELETE_SECONDS = 45
+os.makedirs(IMAGE_DIR, exist_ok=True)
 
+def auto_delete(token):
+    time.sleep(DELETE_AFTER)
+    if token in SESSIONS:
+        path = SESSIONS[token]["path"]
+        if os.path.exists(path):
+            os.remove(path)
+        del SESSIONS[token]
 
-# ===== AUTO DELETE THREAD =====
-def auto_delete():
-    global ACTIVE, ACTIVE_IMAGE
-    time.sleep(AUTO_DELETE_SECONDS)
+@app.route("/create", methods=["POST"])
+def create():
+    token = uuid.uuid4().hex
+    path = f"{IMAGE_DIR}/{token}.jpg"
 
-    with LOCK:
-        if ACTIVE and ACTIVE_IMAGE and os.path.exists(ACTIVE_IMAGE):
-            os.remove(ACTIVE_IMAGE)
-            print("⏱ Auto-deleted image")
+    with open(path, "wb") as f:
+        f.write(b"")
 
-        ACTIVE = False
-        ACTIVE_IMAGE = None
+    SESSIONS[token] = {
+        "path": path,
+        "used": False
+    }
 
+    threading.Thread(target=auto_delete, args=(token,), daemon=True).start()
+    return {"token": token}
 
-# ===== QR ENTRY POINT (STATIC QR) =====
-@app.route("/")
-@app.route("/scan")
-def scan():
-    with LOCK:
-        if not ACTIVE or not ACTIVE_IMAGE:
-            return "No image available"
+@app.route("/scan/<token>")
+def scan(token):
+    if token not in SESSIONS or SESSIONS[token]["used"]:
+        return "Session expired", 410
+    return render_template("download.html", token=token)
 
-    return render_template("download.html")
+@app.route("/image/<token>")
+def image(token):
+    if token not in SESSIONS:
+        abort(404)
+    return send_file(SESSIONS[token]["path"])
 
+@app.route("/download/<token>")
+def download(token):
+    if token not in SESSIONS or SESSIONS[token]["used"]:
+        abort(410)
 
-# ===== DOWNLOAD IMAGE =====
-@app.route("/download")
-def download():
-    global ACTIVE, ACTIVE_IMAGE
+    SESSIONS[token]["used"] = True
+    path = SESSIONS[token]["path"]
 
-    with LOCK:
-        if not ACTIVE or not ACTIVE_IMAGE:
-            return "Session expired"
+    def cleanup():
+        time.sleep(1)
+        if os.path.exists(path):
+            os.remove(path)
+        del SESSIONS[token]
 
-        try:
-            response = send_file(ACTIVE_IMAGE, as_attachment=True)
-            os.remove(ACTIVE_IMAGE)
-            print("⬇ Image downloaded and deleted")
-        except Exception as e:
-            return f"Error: {e}"
+    threading.Thread(target=cleanup, daemon=True).start()
+    return send_file(path, as_attachment=True)
 
-        ACTIVE = False
-        ACTIVE_IMAGE = None
+@app.route("/upload/<token>", methods=["POST"])
+def upload(token):
+    if token not in SESSIONS:
+        abort(404)
 
-    return response
+    with open(SESSIONS[token]["path"], "wb") as f:
+        f.write(request.data)
 
-
-# ===== FUNCTION CALLED BY main.py =====
-def activate_image():
-    global ACTIVE, ACTIVE_IMAGE
-
-    with LOCK:
-        ACTIVE_IMAGE = IMAGE_PATH
-        ACTIVE = True
-
-    threading.Thread(target=auto_delete, daemon=True).start()
-
+    return "OK"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
